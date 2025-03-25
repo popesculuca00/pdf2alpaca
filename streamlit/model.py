@@ -1,86 +1,97 @@
-import time
-import random
-from openai import OpenAI
-import streamlit as st
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
+from threading import Thread
 
-get_client = lambda port_num: OpenAI(
-    api_key="EMPTY",
-    base_url=f"http://localhost:{port_num}/v1",
-)
-
-
-def get_clients():
-    try:
-        gemma_client = get_client(8000)
-    except:
-        gemma_client = None
-
-    try:
-        qwen_client = get_client(8001)
-    except:
-        qwen_client = None
-
-    return{
-        "google/gemma-3-1b-it": gemma_client,
-        "Qwen/Qwen2.5-1.5B-Instruct": qwen_client,
-    }
-
-st.session_state["clients"] = get_clients()
-
-
-class HRLLMModel:
-    def __init__(self):
-        self.model_name = None
-        self.current_response = None
-        self._available_models = None
-
-    def select_model(self, model_name):
-        """Set the model to use for generation"""
-        if model_name:
-            self.model_name = model_name
-
-    def generate_response(self, query):
-        """Generate a response for the given query"""
-        if not self.model_name:
-            available_models = self.get_available_models()
-            if available_models:
-                self.model_name = available_models[0]
+class LlamaInference:
+    """
+    A class for performing inference with a fine-tuned Llama model with token streaming.
+    """
+    
+    def __init__(self, model_path, load_in_4bit=True, device="auto"):
+        """
+        Initialize the model and tokenizer.
         
-        if not self.model_name:
-            self.model_name = "llama3"
+        Args:
+            model_path (str): Path to the fine-tuned model
+            load_in_4bit (bool): Whether to load the model in 4-bit precision
+            device (str): Device to place the model on ("auto", "cuda", "cpu")
+        """
+        self.model_path = model_path
+        self.load_model(load_in_4bit, device)
+    
+    def load_model(self, load_in_4bit=True, device="auto"):
+        """
+        Load the fine-tuned model and tokenizer.
+        """
+        print(f"Loading model from {self.model_path}...")
         
-        try:
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+        
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_path,
+            device_map=device,
+            torch_dtype=torch.float16,
+            load_in_4bit=load_in_4bit,
+            trust_remote_code=True
+        )
+        
+        print("Model loaded successfully!")
+    
+    def format_prompt(self, user_input):
+        """
+        Format the prompt according to Llama 3.2 chat template.
+        
+        Args:
+            user_input (str): User's input question or prompt
+        
+        Returns:
+            str: Formatted prompt ready for the model
+        """
+        return f"<|begin_of_text|><|user|>\n{user_input}<|end_of_user|>\n<|assistant|>\n"
+    
+    def generate_response(self, question, max_new_tokens=2048, temperature=0.1, top_p=0.9, *args, **kwargs):
+        """
+        Generate a response to the input question and yield tokens as they're generated.
+        
+        Args:
+            question (str): Input question or prompt
+            max_new_tokens (int): Maximum number of tokens to generate
+            temperature (float): Sampling temperature (lower = more deterministic)
+            top_p (float): Nucleus sampling parameter
             
-            system_prompt = f"You are a helpful HR assistant. Be concise and friendly in your responses."
-            
-            self.current_response = st.session_state["clients"][self.model_name].chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": query}
-                ],
-                model=self.model_name,
-                stream=True
-            )
-            
-            for chunk in self.current_response:
-                if "is_generating" in st.session_state and not st.session_state.is_generating:
-                    try:
-                        self.current_response.close()
-                    except:
-                        pass
-                    break
-                    
-                content = chunk.choices[0].delta.content if chunk.choices and hasattr(chunk.choices[0].delta, 'content') else ""
-                if content is not None:
-                    yield content
-                
-        except Exception as e:
-            yield f"Error: Unable to generate response with model '{self.model_name}'. Details: {str(e)}"
-            if "is_generating" in st.session_state:
-                st.session_state.is_generating = False
+        Yields:
+            str: Text tokens as they are generated
+        """
+
+        prompt = self.format_prompt(question)
+
+        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+
+        streamer = TextIteratorStreamer(
+            self.tokenizer, 
+            skip_special_tokens=True, 
+            skip_prompt=True
+        )
+
+        generation_kwargs = dict(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            max_new_tokens=max_new_tokens,
+            streamer=streamer,
+            do_sample=True,
+            temperature=temperature,
+            top_p=top_p,
+        )
+        
+        thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
+        thread.start()
+        
+        for new_token in streamer:
+            yield new_token
+
+    def select_model(self, *args, **kwargs):
+        pass
 
     def get_available_models(self):
         """Get a list of available models"""
-        
-        st.session_state["clients"] = get_clients()
-        return list(st.session_state["clients"].keys())
+        return ["llama3.1-finetuned"]

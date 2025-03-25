@@ -111,3 +111,8 @@ output/
 
 # PDF documents (optional, uncomment if you don't want to track PDFs)
 # *.pdf 
+
+old/
+model_training/llama-3-2-3b-finetuned/
+model_training/llama-3-2-8b-finetuned-final/
+model_training/unsloth_compiled_cache/

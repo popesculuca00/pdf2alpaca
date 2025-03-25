@@ -1,11 +1,11 @@
 import streamlit as st
-from model import HRLLMModel
+from model import LlamaInference
 import base64
 
 st.set_page_config(page_title="HR Chat Assistant", page_icon="🟠", layout="wide")
 
 if 'model' not in st.session_state:
-    st.session_state.model = HRLLMModel()
+    st.session_state.model = LlamaInference("/home/lpopescu/fork/pdf2alpaca/model_training/llama-3-2-8b-finetuned-final")
 if 'is_generating' not in st.session_state:
     st.session_state.is_generating = False
 if 'response_text' not in st.session_state:
@@ -165,10 +165,10 @@ if st.session_state.is_generating:
     for word in st.session_state.model.generate_response(st.session_state.query):
         if not st.session_state.is_generating:
             break
-        
+            
         st.session_state.response_text += word
-        message_placeholder.markdown(st.session_state.response_text)
-    
+        message_placeholder.markdown(st.session_state.response_text.replace("<|end_of_assistant|>", ""))
+    st.session_state["response_text"] = st.session_state["response_text"].replace("<|end_of_assistant|>", "")
     if st.session_state.response_text and st.session_state.is_generating:
         st.session_state.chat_history.append({"role": "assistant", "content": st.session_state.response_text})
     
