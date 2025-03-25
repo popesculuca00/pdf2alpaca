@@ -1,3 +1,5 @@
+<img src="logo.png" alt="PDF2Alpaca Logo" width="400"/>
+
 # 📚 Instruction Dataset Generator 🤖
 
 A tool for converting PDF documents into instruction-response pairs suitable for fine-tuning language models in the Alpaca format.
